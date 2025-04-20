@@ -147,9 +147,20 @@ class CheckersGame:
         elif piece == self.BLACK and end_row == 7:
             self.board[end_row, end_col] = self.BLACK_KING
 
+    def count_pieces(self, player):
+        """Count pieces for a given player (including kings)"""
+        return np.sum((self.board == player) | (self.board == player + 2))
+
     def is_game_over(self):
-        """Check if the game is over (no valid moves for current player)"""
-        return len(self.get_valid_moves(self.current_player)) == 0
+        """Check if the game is over (no valid moves or all pieces captured)"""
+        # Check if current player has no valid moves
+        no_valid_moves = len(self.get_valid_moves(self.current_player)) == 0
+        
+        # Check if opponent has no pieces left
+        opponent = self.BLACK if self.current_player == self.RED else self.RED
+        opponent_has_pieces = self.count_pieces(opponent) > 0
+        
+        return no_valid_moves or not opponent_has_pieces
 
     def get_state(self):
         """Return current board state"""

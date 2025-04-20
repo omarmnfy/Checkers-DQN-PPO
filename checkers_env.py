@@ -62,29 +62,47 @@ class CheckersEnv:
         """Calculate reward based on piece difference and game outcome"""
         # Get piece difference
         if self.current_player == CheckersGame.RED:
-            pieces_lost = old_pieces[CheckersGame.RED] - new_pieces[CheckersGame.RED]
-            pieces_captured = old_pieces[CheckersGame.BLACK] - new_pieces[CheckersGame.BLACK]
+            pieces_lost = new_pieces[CheckersGame.RED] - old_pieces[CheckersGame.RED]  # Negative if pieces lost
+            pieces_captured = new_pieces[CheckersGame.BLACK] - old_pieces[CheckersGame.BLACK]  # Negative if pieces captured
             opponent_pieces_remaining = new_pieces[CheckersGame.BLACK]
         else:
-            pieces_lost = old_pieces[CheckersGame.BLACK] - new_pieces[CheckersGame.BLACK]
-            pieces_captured = old_pieces[CheckersGame.RED] - new_pieces[CheckersGame.RED]
+            pieces_lost = new_pieces[CheckersGame.BLACK] - old_pieces[CheckersGame.BLACK]  # Negative if pieces lost
+            pieces_captured = new_pieces[CheckersGame.RED] - old_pieces[CheckersGame.RED]  # Negative if pieces captured
             opponent_pieces_remaining = new_pieces[CheckersGame.RED]
 
         reward = 0
-        # Penalty for losing pieces
-        reward -= pieces_lost * 1.0  # -1.0 for each piece lost
-        # Reward for capturing opponent's pieces
-        reward += pieces_captured * 4.0  # +4.0 points for each capture
+        # Penalty for losing pieces (pieces_lost is negative when pieces are lost)
+        reward += pieces_lost * 1.0  # This will be negative when pieces are lost
+        # Reward for capturing opponent's pieces (pieces_captured is negative when pieces are captured)
+        reward -= pieces_captured * 4.0  # This will be positive when pieces are captured
+        
+        print(f"\nDebug Reward Calculation:")
+        print(f"Current Player: {'RED' if self.current_player == CheckersGame.RED else 'BLACK'}")
+        print(f"Pieces Lost: {pieces_lost}, Reward from loss: {pieces_lost * 1.0}")
+        print(f"Pieces Captured: {pieces_captured}, Reward from capture: {-pieces_captured * 4.0}")
+        print(f"Base Reward: {reward}")
         
         # Check for game over
         if self.done:
+            print(f"Game Over Conditions:")
+            print(f"Opponent pieces remaining: {opponent_pieces_remaining}")
+            print(f"Valid moves left: {len(self.game.get_valid_moves(self.current_player))}")
+            
+            # Check if opponent has no pieces left
             if opponent_pieces_remaining == 0:
-                reward += 100.0  # Big reward for eliminating all opponent's pieces
+                reward += 1000.0  # Big reward for eliminating all opponent's pieces
+                print("Adding +1000 for eliminating all opponent pieces")
+            # Check if current player has no valid moves (losing)
             elif len(self.game.get_valid_moves(self.current_player)) == 0:
-                reward -= 100.0  # Changed from -50.0 to -100.0 for losing
+                reward -= 100.0  # Penalty for losing
+                print("Adding -100 for having no valid moves (losing)")
+            # Otherwise, opponent has no valid moves (winning)
             else:
-                reward += 100.0  # Won (opponent has no valid moves)
-
+                reward += 1000.0  # Reward for winning (opponent has no valid moves)
+                print("Adding +1000 for opponent having no valid moves (winning)")
+            
+            print(f"Final Reward: {reward}")
+        
         return reward
 
     def render(self):
