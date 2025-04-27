@@ -1,139 +1,176 @@
-from checkers_env import CheckersEnv
-from ppo_agent import PPOAgent
-from visualizer import CheckersVisualizer
-from checkers_game import CheckersGame
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
+
+import sys
+# Suppress SDL/macOS window-move warnings
+sys.stderr = open(os.devnull, 'w')
+
 import numpy as np
 import time
 import torch
-import matplotlib.pyplot as plt
 import pygame
+import matplotlib.pyplot as plt
 
-def plot_learning_curve(episode_rewards, window_size=10):
-    if len(episode_rewards) == 0:
-        print("No episodes to plot")
+from checkers_env import CheckersEnv
+from ppo_agent import PPOAgent
+from dqn_agent import DQNAgent
+from visualizer import CheckersVisualizer
+from checkers_game import CheckersGame
+
+
+def plot_learning_curve(episode_rewards, window_size=10, title="Learning Curve"):
+    if not episode_rewards:
         return
-        
-    if len(episode_rewards) < window_size:
-        window_size = len(episode_rewards)
-    
+    window_size = min(window_size, len(episode_rewards))
     plt.figure(figsize=(10, 6))
     plt.plot(episode_rewards, alpha=0.3, label='Raw Rewards')
-    
-    # Calculate moving average
     moving_avg = np.convolve(episode_rewards, np.ones(window_size)/window_size, mode='valid')
-    plt.plot(range(window_size-1, len(episode_rewards)), moving_avg, label=f'Moving Average (window={window_size})')
-    
+    plt.plot(range(window_size-1, len(episode_rewards)), moving_avg, label=f'MA (w={window_size})')
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
-    plt.title('Learning Curve')
+    plt.title(title)
     plt.legend()
     plt.grid(True)
-    plt.savefig('learning_curve.png')
+    plt.savefig(f'{title.lower().replace(" ", "_")}.png')
     plt.close()
 
-def train():
+
+def train(n_episodes=200, update_freq=20):
     env = CheckersEnv()
-    agent = PPOAgent()
+    ppo_agent = PPOAgent()
+    dqn_agent = DQNAgent()
     visualizer = CheckersVisualizer()
     
-    n_episodes = 200
-    update_frequency = 20
-    best_reward = float('-inf')
-    episode_rewards = []
-    running = True
+    ppo_rewards = []
+    dqn_rewards = []
+    best_ppo_reward = float('-inf')
+    best_dqn_reward = float('-inf')
     
     try:
-        for episode in range(n_episodes):
-            if not running:
-                break
-                
+        for ep in range(n_episodes):
+            print(f"\nStarting Episode {ep}")
             state = env.reset()
-            total_reward = 0
-            step_count = 0
+            ppo_total_reward = 0
+            dqn_total_reward = 0
+            step = 0
             done = False
             
-            while not done and running:
-                # Handle Pygame events
+            while not done:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        running = False
                         raise KeyboardInterrupt
-                    
-                # Render the game
+                
                 visualizer.draw_board(state)
                 time.sleep(0.1)
+
+                moves = env.game.get_valid_moves(env.current_player)
+                print(f"\nStep {step}")
+                print(f"Current player: {'RED' if env.current_player == CheckersGame.RED else 'BLACK'}")
+                print(f"Number of valid moves: {len(moves)}")
                 
-                # Get valid moves and select action
-                valid_moves = env.game.get_valid_moves(env.current_player)
-                
-                # If no valid moves, end the game
-                if not valid_moves:
+                if not moves:
+                    print("No valid moves available")
                     done = True
                     continue
+
+                # PPO plays as RED, DQN plays as BLACK
+                if env.current_player == CheckersGame.RED:
+                    print("PPO (RED) selecting action")
+                    action, value, prob = ppo_agent.act(state, moves)
+                    if action is None:
+                        print("PPO failed to select action")
+                        done = True
+                        continue
+                else:
+                    print("DQN (BLACK) selecting action")
+                    action = dqn_agent.act(state, moves)
+                    if action is None:
+                        print("DQN failed to select action")
+                        done = True
+                        continue
+
+                print(f"Selected action: {action}")
+                next_state, reward, done, _ = env.step(action)
+                print(f"Reward: {reward}")
+                print(f"Game done: {done}")
                 
-                action_tuple = agent.act(state, valid_moves)
+                # Store experience for respective agent
+                if env.current_player == CheckersGame.RED:
+                    ppo_agent.remember(state, action, reward, value, prob, done)
+                    ppo_total_reward += reward
+                    print(f"PPO total reward: {ppo_total_reward}")
+                else:
+                    dqn_agent.remember(state, action, reward, next_state, done)
+                    dqn_total_reward += reward
+                    print(f"DQN total reward: {dqn_total_reward}")
                 
-                # If action selection failed, skip this turn
-                if action_tuple is None:
-                    env.current_player = CheckersGame.BLACK if env.current_player == CheckersGame.RED else CheckersGame.RED
-                    continue
+                state = next_state
+                step += 1
+
+                # Update agents periodically
+                if step % update_freq == 0 or done:
+                    print("Updating agents")
+                    if env.current_player == CheckersGame.RED:
+                        next_value = 0 if done else ppo_agent.act(state, env.game.get_valid_moves(env.current_player))[1]
+                        ppo_agent.update(next_value)
+                    else:
+                        dqn_agent.replay(32)  # DQN uses batch size of 32
+
+                if done:
+                    visualizer.draw_board(state)
+                    print(f"\nGame Over! Episode: {ep}")
+                    print(f"PPO (RED) Total Reward: {ppo_total_reward}")
+                    print(f"DQN (BLACK) Total Reward: {dqn_total_reward}")
                     
-                action, value, action_prob = action_tuple
-                
-                try:
-                    # Take action
-                    next_state, reward, done, _ = env.step(action)
+                    # Compute final piece counts
+                    red_count = env.game.count_pieces(CheckersGame.RED)
+                    black_count = env.game.count_pieces(CheckersGame.BLACK)
+                    print(f"Final Pieces - RED: {red_count}, BLACK: {black_count}")
                     
-                    # Store experience
-                    agent.remember(state, action, reward, value, action_prob, done)
+                    # Determine winner
+                    if red_count > black_count:
+                        print("RED (PPO) WON!")
+                    else:
+                        print("BLACK (DQN) WON!")
                     
-                    state = next_state
-                    total_reward += reward
-                    step_count += 1
-                    
-                    # Update policy if enough steps have been taken
-                    if step_count % update_frequency == 0 or done:
-                        if not done:
-                            next_action_tuple = agent.act(next_state, 
-                                env.game.get_valid_moves(env.current_player))
-                            next_value = next_action_tuple[1] if next_action_tuple else 0
-                        else:
-                            next_value = 0
-                            
-                        agent.update(next_value)
-                    
-                    # If game is over, show final state and pause briefly
-                    if done:
-                        visualizer.draw_board(state)
-                        print(f"\nGame Over! Episode: {episode}, Final reward: {total_reward}")
-                        pygame.display.flip()
-                        time.sleep(2)  # Show final state for 2 seconds
-                
-                except Exception as e:
-                    print(f"Error during step: {e}")
-                    done = True
+                    pygame.display.flip()
+                    time.sleep(2)
+
+            # Store rewards
+            ppo_rewards.append(ppo_total_reward)
+            dqn_rewards.append(dqn_total_reward)
             
-            episode_rewards.append(total_reward)
+            # Save best models
+            if ppo_total_reward > best_ppo_reward:
+                best_ppo_reward = ppo_total_reward
+                torch.save(ppo_agent.network.state_dict(), 'best_ppo_model.pth')
+                print(f"New best PPO model saved: {best_ppo_reward}")
             
-            if episode % 10 == 0:
-                print(f"Episode: {episode}, Total Reward: {total_reward}")
-                # Update learning curve plot every 10 episodes
-                if episode_rewards:
-                    plot_learning_curve(episode_rewards)
-                
-            # Save best model
-            if total_reward > best_reward:
-                best_reward = total_reward
-                torch.save(agent.network.state_dict(), 'best_model.pth')
-                print(f"New best model saved with reward: {best_reward}")
+            if dqn_total_reward > best_dqn_reward:
+                best_dqn_reward = dqn_total_reward
+                torch.save(dqn_agent.model.state_dict(), 'best_dqn_model.pth')
+                print(f"New best DQN model saved: {best_dqn_reward}")
+            
+            # Plot learning curves every 10 episodes
+            if ep % 10 == 0:
+                print(f"Episode: {ep}")
+                print(f"PPO Reward: {ppo_total_reward}")
+                print(f"DQN Reward: {dqn_total_reward}")
+                plot_learning_curve(ppo_rewards, title="PPO Learning Curve")
+                plot_learning_curve(dqn_rewards, title="DQN Learning Curve")
                 
     except KeyboardInterrupt:
-        print("\nTraining interrupted by user")
+        print("Training interrupted")
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
     finally:
-        # Show final learning curve
-        if episode_rewards:
-            plot_learning_curve(episode_rewards)
+        # Show final learning curves
+        plot_learning_curve(ppo_rewards, title="PPO Learning Curve")
+        plot_learning_curve(dqn_rewards, title="DQN Learning Curve")
         visualizer.close()
 
-if __name__ == "__main__":
-    train() 
+
+if __name__ == '__main__':
+    train()
