@@ -1,18 +1,12 @@
 import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
 from checkers_game import CheckersGame
 
-class CheckersEnv(gym.Env):
-    """Checkers environment that follows gym interface"""
-    metadata = {'render.modes': ['human', 'rgb_array']}
-
+class CheckersEnv:
     def __init__(self):
-        super(CheckersEnv, self).__init__()
         self.game = CheckersGame()
         self.current_player = CheckersGame.RED
         self.done = False
-        self.total_reward = 0.0
+        self.total_reward = 0.0  # Accumulated reward from Red's perspective
         self.red_pieces_lost = 0
         self.black_pieces_lost = 0
         self.total_pieces_lost = 0
@@ -20,18 +14,8 @@ class CheckersEnv(gym.Env):
         self.total_loss_reward = 0.0
         self.total_capture_reward = 0.0
 
-        # Define action and observation space
-        # Action space: 4096 possible moves (8*8*8*8)
-        self.action_space = spaces.Discrete(4096)
-        
-        # Observation space: 8x8 board with 5 possible values per cell
-        self.observation_space = spaces.Box(
-            low=0, high=4, shape=(8, 8), dtype=np.int8
-        )
-
-    def reset(self, seed=None, options=None):
+    def reset(self):
         """Reset the environment to initial state"""
-        super().reset(seed=seed)
         self.game.reset()
         self.current_player = CheckersGame.RED
         self.done = False
@@ -42,109 +26,63 @@ class CheckersEnv(gym.Env):
         self.total_pieces_captured = 0
         self.total_loss_reward = 0.0
         self.total_capture_reward = 0.0
-        return self._get_observation(), {}
+        return self._get_observation()
 
     def step(self, action):
-        """Execute action and return new state, reward, done, and info"""
+        """Execute action and return observation, reward, done, and info"""
         if self.done:
-            return self._get_observation(), 0.0, True, False, {}
+            return self._get_observation(), 0.0, True, {}
 
-        # Convert action index to move tuple
-        action_tuple = self._index_to_action(action)
-        
-        # Store piece counts before move
-        old_pieces = self._count_pieces()
+        # Record piece counts
+        old_counts = self._count_pieces()
+        # Apply move
+        self.game.make_move(action)
+        new_counts = self._count_pieces()
 
-        # Make the move
-        self.game.make_move(action_tuple)
+        # Compute reward from Red's perspective always
+        reward = self._calculate_reward(old_counts, new_counts)
+        self.total_reward += reward
 
-        # Get new piece counts
-        new_pieces = self._count_pieces()
-
-        # Calculate reward before checking game over
-        reward = self._calculate_reward(old_pieces, new_pieces)
-
-        # Check if game is over
+        # Check if game ended
         self.done = self.game.is_game_over()
 
-        # If game is not over, switch players
         if not self.done:
-            self.current_player = (CheckersGame.BLACK 
-                                 if self.current_player == CheckersGame.RED 
-                                 else CheckersGame.RED)
+            # Switch current player
+            self.current_player = (
+                CheckersGame.BLACK
+                if self.current_player == CheckersGame.RED
+                else CheckersGame.RED
+            )
             self.game.current_player = self.current_player
-
-            # Check if next player has no valid moves
-            if len(self.game.get_valid_moves(self.current_player)) == 0:
+            # If next player has no valid moves, end game
+            if not self.game.get_valid_moves(self.current_player):
                 self.done = True
-                # Recalculate reward with game over
-                reward = self._calculate_reward(old_pieces, new_pieces)
 
-        return self._get_observation(), reward, self.done, False, {}
+        return self._get_observation(), reward, self.done, {}
 
-    def render(self, mode='human'):
-        """Render the environment"""
-        if mode == 'human':
-            # Print the board state
-            state = self.game.get_state()
-            symbols = {
-                CheckersGame.EMPTY: '.',
-                CheckersGame.RED: 'r',
-                CheckersGame.BLACK: 'b',
-                CheckersGame.RED_KING: 'R',
-                CheckersGame.BLACK_KING: 'B'
-            }
-            print('  0 1 2 3 4 5 6 7')
-            for i in range(8):
-                row = f'{i} '
-                for j in range(8):
-                    row += symbols[state[i][j]] + ' '
-                print(row)
-            print()
-        elif mode == 'rgb_array':
-            # Return RGB array for visualization
-            state = self.game.get_state()
-            rgb_array = np.zeros((8, 8, 3), dtype=np.uint8)
-            # Map piece values to colors
-            for i in range(8):
-                for j in range(8):
-                    if state[i][j] == CheckersGame.RED:
-                        rgb_array[i][j] = [255, 0, 0]  # Red
-                    elif state[i][j] == CheckersGame.BLACK:
-                        rgb_array[i][j] = [0, 0, 0]  # Black
-                    elif state[i][j] == CheckersGame.RED_KING:
-                        rgb_array[i][j] = [255, 0, 0]  # Red
-                    elif state[i][j] == CheckersGame.BLACK_KING:
-                        rgb_array[i][j] = [0, 0, 0]  # Black
-                    else:
-                        rgb_array[i][j] = [255, 255, 255]  # White
-            return rgb_array
-
-    def close(self):
-        """Clean up resources"""
-        pass
+    def render(self):
+        """Print the current board state"""
+        state = self.game.get_state()
+        symbols = {
+            CheckersGame.EMPTY: '.',
+            CheckersGame.RED: 'r',
+            CheckersGame.BLACK: 'b',
+            CheckersGame.RED_KING: 'R',
+            CheckersGame.BLACK_KING: 'B',
+        }
+        print('  ' + ' '.join(map(str, range(8))))
+        for i, row in enumerate(state):
+            print(f"{i} " + ' '.join(symbols[cell] for cell in row))
 
     def _get_observation(self):
-        """Get current board state"""
         return self.game.get_state()
 
     def _count_pieces(self):
-        """Count pieces for both players"""
         state = self.game.get_state()
         return {
-            CheckersGame.RED: (np.sum(state == CheckersGame.RED) + 
-                             np.sum(state == CheckersGame.RED_KING)),
-            CheckersGame.BLACK: (np.sum(state == CheckersGame.BLACK) + 
-                               np.sum(state == CheckersGame.BLACK_KING))
+            CheckersGame.RED: np.sum((state == CheckersGame.RED) | (state == CheckersGame.RED_KING)),
+            CheckersGame.BLACK: np.sum((state == CheckersGame.BLACK) | (state == CheckersGame.BLACK_KING)),
         }
-
-    def _index_to_action(self, index):
-        """Convert action index to move tuple"""
-        start_row = index // 512
-        start_col = (index % 512) // 64
-        end_row = (index % 64) // 8
-        end_col = index % 8
-        return ((start_row, start_col), (end_row, end_col))
 
     def _calculate_reward(self, old_pieces, new_pieces):
         """Calculate reward based on piece difference and game outcome"""

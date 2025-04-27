@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque
-import gymnasium as gym
 
 class DQN(nn.Module):
     def __init__(self, input_size, output_size):
@@ -21,10 +20,9 @@ class DQN(nn.Module):
         return self.network(x)
 
 class DQNAgent:
-    def __init__(self, env, memory_size=10000):
-        self.env = env
-        self.state_size = env.observation_space.shape[0] * env.observation_space.shape[1]
-        self.action_size = env.action_space.n
+    def __init__(self, state_size=64, action_size=4096, memory_size=10000):
+        self.state_size = state_size
+        self.action_size = action_size
         self.memory = deque(maxlen=memory_size)
         self.gamma = 0.95  # discount factor
         self.epsilon = 1.0  # exploration rate
@@ -33,8 +31,8 @@ class DQNAgent:
         self.learning_rate = 0.001
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.model = DQN(self.state_size, self.action_size).to(self.device)
-        self.target_model = DQN(self.state_size, self.action_size).to(self.device)
+        self.model = DQN(state_size, action_size).to(self.device)
+        self.target_model = DQN(state_size, action_size).to(self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         self.update_target_model()
 
@@ -44,34 +42,29 @@ class DQNAgent:
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
 
-    def act(self, state, valid_moves=None):
-        if valid_moves is not None and len(valid_moves) == 0:
+    def act(self, state, valid_moves):
+        if len(valid_moves) == 0:
             return None
 
         if random.random() <= self.epsilon:
-            if valid_moves is not None:
-                return random.choice(valid_moves)
-            return self.env.action_space.sample()
+            return random.choice(valid_moves)
 
         state_tensor = torch.FloatTensor(self.preprocess_state(state)).to(self.device)
         with torch.no_grad():
             action_values = self.model(state_tensor)
 
-        if valid_moves is not None:
-            # Create a mapping of valid moves to their indices
-            move_to_index = {move: self.action_to_index(move) for move in valid_moves}
-            valid_indices = list(move_to_index.values())
-            
-            # Get Q-values only for valid moves
-            valid_q_values = action_values[valid_indices]
-            best_valid_index = valid_indices[valid_q_values.argmax().item()]
-            
-            # Find the move corresponding to the best valid index
-            for move, idx in move_to_index.items():
-                if idx == best_valid_index:
-                    return move
-        else:
-            return action_values.argmax().item()
+        # Create a mapping of valid moves to their indices
+        move_to_index = {move: self.action_to_index(move) for move in valid_moves}
+        valid_indices = list(move_to_index.values())
+        
+        # Get Q-values only for valid moves
+        valid_q_values = action_values[valid_indices]
+        best_valid_index = valid_indices[valid_q_values.argmax().item()]
+        
+        # Find the move corresponding to the best valid index
+        for move, idx in move_to_index.items():
+            if idx == best_valid_index:
+                return move
 
     def replay(self, batch_size):
         if len(self.memory) < batch_size:
@@ -116,9 +109,7 @@ class DQNAgent:
 
     def action_to_index(self, action):
         # Convert action tuple to index
-        if isinstance(action, tuple):
-            start, end = action
-            start_row, start_col = start
-            end_row, end_col = end
-            return start_row * 512 + start_col * 64 + end_row * 8 + end_col
-        return action 
+        start, end = action
+        start_row, start_col = start
+        end_row, end_col = end
+        return start_row * 512 + start_col * 64 + end_row * 8 + end_col 
