@@ -10,6 +10,7 @@ import time
 import torch
 import pygame
 import matplotlib.pyplot as plt
+import gymnasium as gym
 
 from checkers_env import CheckersEnv
 from ppo_agent import PPOAgent
@@ -37,8 +38,8 @@ def plot_learning_curve(episode_rewards, window_size=10, title="Learning Curve")
 
 def train(n_episodes=200, update_freq=20):
     env = CheckersEnv()
-    ppo_agent = PPOAgent()
-    dqn_agent = DQNAgent()
+    ppo_agent = PPOAgent(env)
+    dqn_agent = DQNAgent(env)
     visualizer = CheckersVisualizer()
     
     ppo_rewards = []
@@ -49,13 +50,14 @@ def train(n_episodes=200, update_freq=20):
     try:
         for ep in range(n_episodes):
             print(f"\nStarting Episode {ep}")
-            state = env.reset()
+            state, _ = env.reset()
             ppo_total_reward = 0
             dqn_total_reward = 0
             step = 0
             done = False
+            truncated = False
             
-            while not done:
+            while not (done or truncated):
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         raise KeyboardInterrupt
@@ -90,7 +92,7 @@ def train(n_episodes=200, update_freq=20):
                         continue
 
                 print(f"Selected action: {action}")
-                next_state, reward, done, _ = env.step(action)
+                next_state, reward, done, truncated, info = env.step(action)
                 print(f"Reward: {reward}")
                 print(f"Game done: {done}")
                 

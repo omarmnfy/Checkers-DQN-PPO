@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Categorical
+import gymnasium as gym
 
 class PPONetwork(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
@@ -34,9 +35,10 @@ class PPONetwork(nn.Module):
         return policy, value
 
 class PPOAgent:
-    def __init__(self, state_size=64, action_size=4096):  # 8*8*8*8 possible moves
-        self.state_size = state_size
-        self.action_size = action_size
+    def __init__(self, env):
+        self.env = env
+        self.state_size = env.observation_space.shape[0] * env.observation_space.shape[1]
+        self.action_size = env.action_space.n
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # PPO hyperparameters
@@ -46,7 +48,7 @@ class PPOAgent:
         self.learning_rate = 0.0003
         
         # Initialize network and optimizer
-        self.network = PPONetwork(state_size, 256, action_size).to(self.device)
+        self.network = PPONetwork(self.state_size, 256, self.action_size).to(self.device)
         self.optimizer = optim.Adam(self.network.parameters(), lr=self.learning_rate)
         
         # Memory buffers
@@ -65,8 +67,10 @@ class PPOAgent:
 
     def action_to_index(self, action):
         # Convert action tuple ((start_row, start_col), (end_row, end_col)) to single index
-        (start_row, start_col), (end_row, end_col) = action
-        return start_row * 512 + start_col * 64 + end_row * 8 + end_col
+        if isinstance(action, tuple):
+            (start_row, start_col), (end_row, end_col) = action
+            return start_row * 512 + start_col * 64 + end_row * 8 + end_col
+        return action
 
     def index_to_action(self, index):
         # Convert index back to action tuple
@@ -84,9 +88,9 @@ class PPOAgent:
         self.action_probs.append(action_prob)
         self.dones.append(done)
 
-    def act(self, state, valid_moves):
-        if not valid_moves:  # If no valid moves
-            return None
+    def act(self, state, valid_moves=None):
+        if valid_moves is not None and len(valid_moves) == 0:
+            return None, None, None
         
         try:
             state_tensor = self.preprocess_state(state)
@@ -94,28 +98,34 @@ class PPOAgent:
             with torch.no_grad():
                 policy, value = self.network(state_tensor)
             
-            # Create mask for valid moves
-            valid_indices = [self.action_to_index(move) for move in valid_moves]
-            mask = torch.zeros_like(policy)
-            mask[valid_indices] = 1
-            masked_policy = policy * mask
-            
-            # Check if any valid moves have non-zero probability
-            if masked_policy.sum().item() <= 1e-10:
-                # If all probabilities are zero, use uniform distribution over valid moves
-                masked_policy = mask / len(valid_moves)
+            if valid_moves is not None:
+                # Create mask for valid moves
+                valid_indices = [self.action_to_index(move) for move in valid_moves]
+                mask = torch.zeros_like(policy)
+                mask[valid_indices] = 1
+                masked_policy = policy * mask
+                
+                # Check if any valid moves have non-zero probability
+                if masked_policy.sum().item() <= 1e-10:
+                    # If all probabilities are zero, use uniform distribution over valid moves
+                    masked_policy = mask / len(valid_moves)
+                else:
+                    # Normalize the masked policy
+                    masked_policy = masked_policy / masked_policy.sum()
+                
+                # Sample action from the masked policy
+                dist = Categorical(masked_policy)
+                action_idx = dist.sample()
+                
+                # Convert index back to move
+                for move, idx in zip(valid_moves, valid_indices):
+                    if idx == action_idx.item():
+                        return move, value.item(), masked_policy[action_idx].item()
             else:
-                # Normalize the masked policy
-                masked_policy = masked_policy / masked_policy.sum()
-            
-            # Sample action from the masked policy
-            dist = Categorical(masked_policy)
-            action_idx = dist.sample()
-            
-            # Convert index back to move
-            for move, idx in zip(valid_moves, valid_indices):
-                if idx == action_idx.item():
-                    return move, value.item(), masked_policy[action_idx].item()
+                # Sample action from the full policy
+                dist = Categorical(policy)
+                action_idx = dist.sample()
+                return action_idx.item(), value.item(), policy[action_idx].item()
             
             # If no move found (shouldn't happen, but just in case)
             return None, None, None
