@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkers Game</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="game-container">
+        <header class="game-header">
+            <h1>Checkers Game</h1>
+            <div class="game-controls">
+                <button id="newGameBtn" class="btn btn-primary">New Game</button>
+                <button id="undoBtn" class="btn btn-secondary">Undo Move</button>
+                <select id="gameMode" class="game-mode-select">
+                    <option value="human-vs-human">Human vs Human</option>
+                    <option value="human-vs-ai">Human vs AI</option>
+                </select>
+            </div>
+        </header>
+
+        <div class="game-content">
+            <div class="game-info">
+                <div class="player-info">
+                    <div class="player red-player">
+                        <div class="player-indicator"></div>
+                        <span>Red Player</span>
+                        <div class="captured-pieces" id="redCaptured"></div>
+                    </div>
+                    <div class="turn-indicator" id="turnIndicator">
+                        Red's Turn
+                    </div>
+                    <div class="player black-player">
+                        <div class="player-indicator"></div>
+                        <span>Black Player</span>
+                        <div class="captured-pieces" id="blackCaptured"></div>
+                    </div>
+                </div>
+                
+                <div class="game-status" id="gameStatus">
+                    Click on a piece to select it, then click on a valid square to move.
+                </div>
+            </div>
+
+            <div class="board-container">
+                <div class="board" id="gameBoard"></div>
+            </div>
+
+            <div class="move-history">
+                <h3>Move History</h3>
+                <div class="moves-list" id="movesList"></div>
+            </div>
+        </div>
+
+        <div class="game-over-modal" id="gameOverModal">
+            <div class="modal-content">
+                <h2 id="gameOverTitle">Game Over!</h2>
+                <p id="gameOverMessage"></p>
+                <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/checkers-game.js"></script>
+    <script src="js/ai-player.js"></script>
+    <script src="js/game-controller.js"></script>
+</body>
+</html>
